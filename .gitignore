@@ -3,3 +3,6 @@
 *.log
 kubeconfig*
 .DS_Store
+
+# promtool extraction artifacts
+observability/alerts/tests/.extracted/

@@ -1,0 +1,124 @@
+# promtool unit tests for the SLO rules. Run via scripts/test-rules.sh
+# (which extracts the rule specs from the PrometheusRule CRs into .extracted/).
+#
+# These pin the behaviors the README claims:
+#   1. the 14.4x fast-burn threshold actually separates 1.3% from 1.5%
+#   2. the short-window gate suppresses paging after an outage is over
+#   3. probe traffic (/healthz) cannot burn the error budget
+#   4. a prod-only outage fires with namespace=prod while default stays quiet
+#      (the exact blind spot of the old cluster-wide absent() rule)
+#   5. a namespace that was never deployed never alerts
+rule_files:
+  - .extracted/availability-alert.yaml
+  - .extracted/burn-rate-alert.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ---- 1a. below threshold: 1.3% error ratio must NOT fire ----------------
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+        values: '0+987x80'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/"}'
+        values: '0+13x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: PodinfoSLOFastBurn
+        exp_alerts: []
+
+  # ---- 1b. above threshold: 1.5% error ratio must fire --------------------
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+        values: '0+985x80'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/"}'
+        values: '0+15x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: PodinfoSLOFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: PodinfoSLOFastBurn
+              namespace: default
+              severity: critical
+            exp_annotations:
+              summary: "podinfo (default) is burning its 30-day error budget >14x too fast"
+              description: "1h error ratio in default is 1.5%, above 14.4x the allowed 0.1% budget rate, and the last 5 minutes are still burning. At this rate the 30-day budget is gone in ~2 days. Page-worthy: treat as an active incident."
+              runbook_url: "https://github.com/navaneeth-c/k8s-slo-lab#why-two-burn-rate-windows-not-one"
+
+  # ---- 2. short-window gate: resolved outage stops paging -----------------
+  # 30 minutes at 50% errors, then fully clean. At t=45m the 1h window is
+  # still far above threshold (~33%) but the 5m window is 0 — no alert.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+        values: '0+500x30 15000+1000x60'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/"}'
+        values: '0+500x30 15000+0x60'
+    alert_rule_test:
+      - eval_time: 25m          # during the outage: firing
+        alertname: PodinfoSLOFastBurn
+        exp_alerts:
+          - exp_labels:
+              alertname: PodinfoSLOFastBurn
+              namespace: default
+              severity: critical
+            exp_annotations:
+              summary: "podinfo (default) is burning its 30-day error budget >14x too fast"
+              description: "1h error ratio in default is 50%, above 14.4x the allowed 0.1% budget rate, and the last 5 minutes are still burning. At this rate the 30-day budget is gone in ~2 days. Page-worthy: treat as an active incident."
+              runbook_url: "https://github.com/navaneeth-c/k8s-slo-lab#why-two-burn-rate-windows-not-one"
+      - eval_time: 45m          # 15 minutes after recovery: suppressed
+        alertname: PodinfoSLOFastBurn
+        exp_alerts: []
+
+  # ---- 3. probe traffic cannot burn budget --------------------------------
+  # A liveness probe failing hard (60 x 500s/min on /healthz) while real
+  # traffic is clean. The SLI excludes probe paths, so: no alert.
+  - interval: 1m
+    input_series:
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/healthz"}'
+        values: '0+60x80'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+        values: '0+100x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: PodinfoSLOFastBurn
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: PodinfoSLOSlowBurn
+        exp_alerts: []
+
+  # ---- 4. prod-only outage fires; healthy default does not mask it --------
+  # Two prod pods scraped for 30m, then gone (stale). default healthy the
+  # whole time. The old cluster-wide absent() rule stayed silent here.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="podinfo",namespace="prod",pod="a"}'
+        values: '1x30 stale'
+      - series: 'up{job="podinfo",namespace="prod",pod="b"}'
+        values: '1x30 stale'
+      - series: 'up{job="podinfo",namespace="default",pod="c"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PodinfoUnavailable
+        exp_alerts:
+          - exp_labels:
+              alertname: PodinfoUnavailable
+              namespace: prod
+              severity: critical
+            exp_annotations:
+              summary: "podinfo (prod) has been unreachable for 2+ minutes"
+              description: "No healthy podinfo target in `prod` for at least 2 minutes, though one existed within the last hour. Likely causes: scaled to zero, all pods crashlooping, a bad rollout, or a NetworkPolicy/Service change blocking scrape traffic."
+              runbook_url: "https://github.com/navaneeth-c/k8s-slo-lab#debugging-notes"
+
+  # ---- 5. a namespace never deployed never alerts -------------------------
+  - interval: 1m
+    input_series:
+      - series: 'up{job="podinfo",namespace="default",pod="c"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: PodinfoUnavailable
+        exp_alerts: []
