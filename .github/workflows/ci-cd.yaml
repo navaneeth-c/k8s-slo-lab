@@ -1,25 +1,39 @@
-name: podinfo CI/CD
+name: slo-lab CI/CD
 
-# Pushes to main run the full pipeline (lint -> staging -> gate -> prod).
+# Pushes to main run the full pipeline (checks -> staging -> gate -> prod).
 # Everything else is validated through its pull request. Triggering on both
-# `push: ["**"]` and `pull_request` would fire two identical runs for every
-# PR commit — same jobs, twice the runner minutes, a doubled check list.
+# `push: ["**"]` and `pull_request` would fire two identical runs per PR
+# commit — same jobs, twice the runner minutes, a doubled check list.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+# A second push while a run is in flight supersedes it; without this, pushes
+# queue up behind the manual prod approval gate.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HELM_VERSION: "v3.15.0"
+  PROMETHEUS_VERSION: "3.5.0"
+
 jobs:
   lint-and-template:
     name: Lint & Template
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: "v3.15.0"
+          version: ${{ env.HELM_VERSION }}
       - name: helm lint (default values)
         run: helm lint ./charts/podinfo
       - name: helm lint (prod values)
@@ -29,17 +43,36 @@ jobs:
       - name: helm template (prod values)
         run: helm template podinfo ./charts/podinfo -f ./charts/podinfo/values-prod.yaml
 
+  test-alert-rules:
+    # The alert rules are the point of this repo, so they get real unit tests:
+    # promtool fixtures pin the burn thresholds (1.5% fires, 1.3% doesn't),
+    # the short-window suppression, the probe-traffic exclusion, and the
+    # per-namespace outage detection. See observability/alerts/tests/.
+    name: Alert rule unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install promtool
+        run: |
+          curl -sSfL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+            | tar -xz --strip-components=1 -C /usr/local/bin --wildcards '*/promtool'
+          promtool --version
+      - name: Run rule tests
+        run: ./scripts/test-rules.sh
+
   deploy-staging:
     name: Deploy to Staging (ephemeral kind cluster)
-    needs: lint-and-template
+    needs: [lint-and-template, test-alert-rules]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: "v3.15.0"
+          version: ${{ env.HELM_VERSION }}
       - name: Create ephemeral kind cluster
         uses: helm/kind-action@v1
         with:
@@ -51,47 +84,51 @@ jobs:
             --wait --timeout 3m
       - name: Verify rollout
         run: kubectl -n staging rollout status deployment/podinfo
+      - name: Smoke test
+        # --wait proves the pods are Ready; this proves the service answers.
+        run: |
+          kubectl -n staging run smoke --image=curlimages/curl:8.10.1 --restart=Never --rm -i --quiet -- \
+            curl -sf --max-time 5 http://podinfo:9898/healthz
 
   deploy-prod:
     name: Deploy to Production
     needs: deploy-staging
     runs-on: ubuntu-latest
-    # Manual-approval gate lives here: GitHub pauses this job until an
-    # authorized reviewer approves it, but ONLY once a "production"
-    # environment with a required-reviewers protection rule exists in this
-    # repo's Settings > Environments. That protection rule is a one-time
-    # manual repo setting — it can't be expressed in workflow YAML. See README.
+    timeout-minutes: 15
+    # Manual-approval gate: GitHub pauses this job until an authorized
+    # reviewer approves it, via the "production" environment's
+    # required-reviewers protection rule (a one-time repo setting that can't
+    # be expressed in workflow YAML — see README).
     environment: production
     steps:
       - uses: actions/checkout@v4
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: "v3.15.0"
+          version: ${{ env.HELM_VERSION }}
 
       # A real prod deploy would target a long-lived cluster via a
       # kubeconfig/cloud-credentials secret here. This lab spins up a second
       # ephemeral kind cluster instead, so the pipeline mechanics themselves
-      # (manual approval -> atomic deploy -> auto-rollback-on-failure) are
-      # exercised for real, with no cloud account required to run it.
+      # (manual approval -> atomic deploy) are exercised for real, with no
+      # cloud account required to run it.
       - name: Create ephemeral "prod" kind cluster
         uses: helm/kind-action@v1
         with:
           cluster_name: prod-sim
 
-      - name: Deploy to prod (--atomic auto-rolls-back on failure)
-        id: prod_deploy
+      # --atomic is the rollback mechanism: on a failed upgrade it rolls back
+      # to the previous release, and on a failed FIRST install it uninstalls.
+      # An earlier revision also had an explicit `helm rollback` step behind
+      # this — dead code on an ephemeral cluster, where the release is always
+      # revision 1 and there is never a revision to roll back to.
+      - name: Deploy to prod (--atomic)
         run: |
           helm upgrade --install podinfo ./charts/podinfo \
             -f ./charts/podinfo/values-prod.yaml \
             --namespace prod --create-namespace \
             --atomic --timeout 3m
-
-      - name: Explicit rollback safety net
-        # --atomic already handles most in-release failures; this step makes
-        # the rollback requirement visible and covers cases where a
-        # post-deploy check fails after Helm itself reported success.
-        if: failure() && steps.prod_deploy.outcome == 'failure'
+      - name: Smoke test
         run: |
-          echo "Prod deploy failed — rolling back explicitly."
-          helm rollback podinfo --namespace prod || true
+          kubectl -n prod run smoke --image=curlimages/curl:8.10.1 --restart=Never --rm -i --quiet -- \
+            curl -sf --max-time 5 http://podinfo:9898/healthz
