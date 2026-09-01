@@ -1,0 +1,9 @@
+{"version":3,"term":{"cols":80,"rows":24},"timestamp":1788299735,"idle_time_limit":2.0,"command":"make break","env":{"SHELL":"/bin/zsh"}}
+[0.051, "o", "kubectl -n default scale deployment/podinfo --replicas=0\r\n"]
+[0.038, "o", "deployment.apps/podinfo scaled\r\n"]
+[0.002, "o", "./scripts/alert-watch.sh PodinfoUnavailable firing 300\r\n"]
+[1.055, "o", "Watching alert 'PodinfoUnavailable' for state 'firing' (timeout 300s)...\r\n"]
+[0.033, "o", "14:55:36  PodinfoUnavailable -> inactive\r\n"]
+[40.356, "o", "14:56:17  PodinfoUnavailable -> pending\r\n"]
+[121.108, "o", "14:58:18  PodinfoUnavailable -> firing\r\nAlert reached 'firing'.\r\n"]
+[0.002, "x", "0"]
