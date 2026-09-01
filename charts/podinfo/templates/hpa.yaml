@@ -19,4 +19,9 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      # Default scale-down is immediate, which flaps under bursty load;
+      # 5 minutes of stability before shrinking is the usual guard.
+      stabilizationWindowSeconds: 300
 {{- end }}
