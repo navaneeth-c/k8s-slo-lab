@@ -9,6 +9,11 @@ metadata:
   labels:
     app.kubernetes.io/name: podinfo
 spec:
+  # Without jobLabel, the operator derives the `job` label from the Service
+  # NAME — which equals "podinfo" only while the Helm release happens to be
+  # named podinfo. Every alert and dashboard query matches on job="podinfo",
+  # so pin it to the app label instead of an accident of release naming.
+  jobLabel: app.kubernetes.io/name
   # Without this, a ServiceMonitor only matches Services in its OWN namespace.
   # This one lives in `monitoring`; podinfo's Service lives in `default` — so
   # this has to be explicit, or Prometheus silently scrapes nothing. Hit this
