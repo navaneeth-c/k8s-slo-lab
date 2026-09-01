@@ -1,0 +1,98 @@
+# Multi-window, multi-burn-rate alerting for a 99.9% / 30-day availability SLO.
+#
+# Error budget = 0.1% of requests. Burn rate = observed error ratio / 0.001.
+# A sustained burn rate of 1 exhausts the budget in exactly 30 days; 14.4
+# exhausts it in ~2 days; 6 exhausts it in ~5 days.
+#
+# Two windows, because one is never enough:
+#
+#   fast  1h @ 14.4x  -> critical.  Catches a hard breakage quickly. On its own
+#                        it is twitchy: a short, sharp spike can clear the
+#                        threshold and page for something already over.
+#   slow  6h @ 6x     -> warning.   Catches the slow bleed that never trips the
+#                        fast window but still eats the month's budget. On its
+#                        own it is far too slow to be the only signal.
+#
+# Each alert is additionally gated on a short window (5m for fast, 30m for slow)
+# that must ALSO be burning. That is what stops an alert from continuing to fire
+# after the problem is fixed: the long window has a long memory and decays
+# slowly, so without the short-window gate a resolved 10-minute outage keeps the
+# 1h alert firing for the better part of an hour. This is the Google SRE
+# Workbook's multi-window pattern; the short-window condition is the half people
+# usually leave out.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: podinfo-slo-burn-rate
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: podinfo.slo
+      rules:
+        # ---- SLI recording rules -------------------------------------------
+        # Fraction of requests that were server errors, at each window length.
+        # Recorded rather than inlined so the alert expressions stay readable
+        # and so the same series backs both the dashboard and the alerts.
+        - record: podinfo:http_error_ratio:rate5m
+          expr: |
+            sum(rate(http_requests_total{job="podinfo", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="podinfo"}[5m]))
+
+        - record: podinfo:http_error_ratio:rate30m
+          expr: |
+            sum(rate(http_requests_total{job="podinfo", status=~"5.."}[30m]))
+            /
+            sum(rate(http_requests_total{job="podinfo"}[30m]))
+
+        - record: podinfo:http_error_ratio:rate1h
+          expr: |
+            sum(rate(http_requests_total{job="podinfo", status=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{job="podinfo"}[1h]))
+
+        - record: podinfo:http_error_ratio:rate6h
+          expr: |
+            sum(rate(http_requests_total{job="podinfo", status=~"5.."}[6h]))
+            /
+            sum(rate(http_requests_total{job="podinfo"}[6h]))
+
+        # ---- Fast burn: 1h @ 14.4x, gated on 5m ----------------------------
+        # Budget gone in ~2 days if this holds. Page someone.
+        - alert: PodinfoSLOFastBurn
+          expr: |
+            podinfo:http_error_ratio:rate1h  > (14.4 * 0.001)
+            and
+            podinfo:http_error_ratio:rate5m  > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: critical
+            slo: podinfo-availability
+          annotations:
+            summary: "podinfo is burning its 30-day error budget >14x too fast"
+            description: >-
+              1h error ratio is {{ $value | humanizePercentage }}, above 14.4x the
+              allowed 0.1% budget rate, and the last 5 minutes are still burning.
+              At this rate the 30-day error budget is gone in roughly 2 days.
+              Page-worthy: treat as an active incident, not a routine alert.
+
+        # ---- Slow burn: 6h @ 6x, gated on 30m ------------------------------
+        # Budget gone in ~5 days. Not a 3am page — but it will not fix itself,
+        # and by the time the fast window notices, most of the month is spent.
+        - alert: PodinfoSLOSlowBurn
+          expr: |
+            podinfo:http_error_ratio:rate6h  > (6 * 0.001)
+            and
+            podinfo:http_error_ratio:rate30m > (6 * 0.001)
+          for: 15m
+          labels:
+            severity: warning
+            slo: podinfo-availability
+          annotations:
+            summary: "podinfo is burning its 30-day error budget ~6x too fast"
+            description: >-
+              6h error ratio is {{ $value | humanizePercentage }}, above 6x the
+              allowed 0.1% budget rate, and the last 30 minutes are still burning.
+              At this rate the 30-day error budget is gone in roughly 5 days.
+              Not a page — but it needs an owner before the fast window catches it.

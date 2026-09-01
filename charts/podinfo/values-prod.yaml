@@ -1,0 +1,23 @@
+# Production overrides. Deploy with:
+#   helm upgrade --install podinfo ./charts/podinfo -f ./charts/podinfo/values-prod.yaml -n prod --create-namespace
+#
+# Only overrides what actually needs to differ in prod; everything else
+# inherits from values.yaml, so the diff here IS the design decision.
+
+replicaCount: 4
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  minReplicas: 4
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 60   # scale earlier in prod than in dev — leave more headroom
+
+podAnnotations:
+  environment: production

@@ -1,0 +1,33 @@
+# Wires Prometheus (via the Prometheus Operator) up to scrape podinfo's /metrics.
+# Applied standalone (not part of the podinfo chart itself) so the chart has
+# no hard dependency on the Prometheus Operator CRDs existing — it can be
+# installed on a cluster with or without observability present.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: podinfo
+  labels:
+    app.kubernetes.io/name: podinfo
+spec:
+  # Without this, a ServiceMonitor only matches Services in its OWN namespace.
+  # This one lives in `monitoring`; podinfo's Service lives in `default` — so
+  # this has to be explicit, or Prometheus silently scrapes nothing. Hit this
+  # for real on first deploy (targets page was empty, up{job="podinfo"} had no
+  # data) before tracing it back to this.
+  namespaceSelector:
+    matchNames:
+      - default   # dev deploy target, see scripts/deploy-podinfo.sh
+      - prod      # scripts/deploy-podinfo.sh prod
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: podinfo
+  endpoints:
+    # podinfo serves /metrics on its single main port, not a dedicated
+    # metrics port — port name here matches the named port in
+    # charts/podinfo/templates/service.yaml. (Second real bug found while
+    # verifying: a separate 9797 metrics port doesn't exist. Confirmed by
+    # port-forwarding 9898 directly and getting a real /metrics response,
+    # while 9797 was refusing connections.)
+    - port: http
+      path: /metrics
+      interval: 15s

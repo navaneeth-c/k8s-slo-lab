@@ -1,0 +1,51 @@
+# Default values for the podinfo chart, sane for local/dev use.
+# Production overrides live in values-prod.yaml (replicas, resource limits).
+
+replicaCount: 2
+
+image:
+  repository: stefanprodan/podinfo
+  tag: "6.7.1"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 9898  # app HTTP port — /metrics is also served here, podinfo doesn't expose a separate metrics port
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+config:
+  logLevel: info
+  uiMessage: "k8s-slo-lab"
+  uiColor: "#34577c"
+
+podAnnotations: {}
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5

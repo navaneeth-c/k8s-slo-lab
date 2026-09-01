@@ -1,0 +1,18 @@
+# Local kind cluster for the podinfo platform.
+# Single control-plane + two workers: enough to see the HPA and pod (anti-)affinity
+# behave meaningfully, without the overhead of a bigger topology.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: k8s-slo-lab
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Grafana's the only thing exposed via NodePort (see
+      # observability/kube-prometheus-stack-values.yaml) — podinfo itself is
+      # ClusterIP, reached via port-forward per the README, so it doesn't need
+      # a mapping here.
+      - containerPort: 30090
+        hostPort: 30090
+        protocol: TCP
+  - role: worker
+  - role: worker

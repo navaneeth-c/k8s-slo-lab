@@ -1,0 +1,32 @@
+# Fires when podinfo has been unreachable for 2+ consecutive minutes.
+#
+# NOT just `up{job="podinfo"} == 0` — tested that against a real induced
+# outage (scaled the deployment to 0) and it never fired. Reason: `up` only
+# exists for targets Prometheus's service discovery actually found. Scale to
+# zero -> zero endpoints -> the ServiceMonitor discovers no targets at all ->
+# the `up` series doesn't go to 0, it disappears entirely. `== 0` only catches
+# "a target exists but the scrape itself failed" (e.g. a Ready pod with the
+# app hung) — it misses "no healthy pods exist," which is the more common
+# outage shape and literally what the requirement asks for.
+#
+# `absent(up{job="podinfo"} == 1)` catches both: it fires if there's no
+# up-and-healthy target at all, whether that's because none were discovered
+# or because the ones that were discovered are reporting down.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: podinfo-availability
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: podinfo.availability
+      rules:
+        - alert: PodinfoUnavailable
+          expr: absent(up{job="podinfo"} == 1)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "podinfo has been unreachable for 2+ minutes"
+            description: "No healthy podinfo target has been scraped for at least 2 minutes. Likely causes: scaled to zero, all pods crashlooping, a bad rollout, or a NetworkPolicy/Service misconfiguration blocking scrape traffic."

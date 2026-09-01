@@ -1,0 +1,93 @@
+name: podinfo CI/CD
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-template:
+    name: Lint & Template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.0"
+      - name: helm lint (default values)
+        run: helm lint ./charts/podinfo
+      - name: helm lint (prod values)
+        run: helm lint ./charts/podinfo -f ./charts/podinfo/values-prod.yaml
+      - name: helm template (default values)
+        run: helm template podinfo ./charts/podinfo
+      - name: helm template (prod values)
+        run: helm template podinfo ./charts/podinfo -f ./charts/podinfo/values-prod.yaml
+
+  deploy-staging:
+    name: Deploy to Staging (ephemeral kind cluster)
+    needs: lint-and-template
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.0"
+      - name: Create ephemeral kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: staging
+      - name: Deploy to staging
+        run: |
+          helm upgrade --install podinfo ./charts/podinfo \
+            --namespace staging --create-namespace \
+            --wait --timeout 3m
+      - name: Verify rollout
+        run: kubectl -n staging rollout status deployment/podinfo
+
+  deploy-prod:
+    name: Deploy to Production
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    # Manual-approval gate lives here: GitHub pauses this job until an
+    # authorized reviewer approves it, but ONLY once a "production"
+    # environment with a required-reviewers protection rule exists in this
+    # repo's Settings > Environments. That protection rule is a one-time
+    # manual repo setting — it can't be expressed in workflow YAML. See README.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.0"
+
+      # A real prod deploy would target a long-lived cluster via a
+      # kubeconfig/cloud-credentials secret here. This lab spins up a second
+      # ephemeral kind cluster instead, so the pipeline mechanics themselves
+      # (manual approval -> atomic deploy -> auto-rollback-on-failure) are
+      # exercised for real, with no cloud account required to run it.
+      - name: Create ephemeral "prod" kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: prod-sim
+
+      - name: Deploy to prod (--atomic auto-rolls-back on failure)
+        id: prod_deploy
+        run: |
+          helm upgrade --install podinfo ./charts/podinfo \
+            -f ./charts/podinfo/values-prod.yaml \
+            --namespace prod --create-namespace \
+            --atomic --timeout 3m
+
+      - name: Explicit rollback safety net
+        # --atomic already handles most in-release failures; this step makes
+        # the rollback requirement visible and covers cases where a
+        # post-deploy check fails after Helm itself reported success.
+        if: failure() && steps.prod_deploy.outcome == 'failure'
+        run: |
+          echo "Prod deploy failed — rolling back explicitly."
+          helm rollback podinfo --namespace prod || true

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "podinfo.fullname" . }}
+  labels:
+    {{- include "podinfo.labels" . | nindent 4 }}
+  annotations:
+    # Documents the scrape contract explicitly; the ServiceMonitor (applied
+    # separately, see observability/servicemonitor.yaml) is what actually
+    # wires Prometheus up, but this makes the intent visible on the Service itself.
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9898"
+    prometheus.io/path: "/metrics"
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "podinfo.selectorLabels" . | nindent 4 }}
