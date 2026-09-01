@@ -36,6 +36,10 @@ config:
 
 podAnnotations: {}
 
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
 livenessProbe:
   httpGet:
     path: /healthz
