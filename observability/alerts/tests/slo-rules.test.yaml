@@ -18,9 +18,9 @@ tests:
   # ---- 1a. below threshold: 1.3% error ratio must NOT fire ----------------
   - interval: 1m
     input_series:
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="root"}'
         values: '0+987x80'
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="root"}'
         values: '0+13x80'
     alert_rule_test:
       - eval_time: 70m
@@ -30,9 +30,9 @@ tests:
   # ---- 1b. above threshold: 1.5% error ratio must fire --------------------
   - interval: 1m
     input_series:
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="root"}'
         values: '0+985x80'
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="root"}'
         values: '0+15x80'
     alert_rule_test:
       - eval_time: 70m
@@ -52,9 +52,9 @@ tests:
   # still far above threshold (~33%) but the 5m window is 0 — no alert.
   - interval: 1m
     input_series:
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="root"}'
         values: '0+500x30 15000+1000x60'
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="root"}'
         values: '0+500x30 15000+0x60'
     alert_rule_test:
       - eval_time: 25m          # during the outage: firing
@@ -77,9 +77,9 @@ tests:
   # traffic is clean. The SLI excludes probe paths, so: no alert.
   - interval: 1m
     input_series:
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="/healthz"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="500",path="healthz"}'
         values: '0+60x80'
-      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="/"}'
+      - series: 'http_request_duration_seconds_count{job="podinfo",namespace="default",status="200",path="root"}'
         values: '0+100x80'
     alert_rule_test:
       - eval_time: 70m
