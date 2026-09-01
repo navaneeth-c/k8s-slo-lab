@@ -2,7 +2,9 @@
 
 Run a real SLO end to end on a laptop: an availability target, an error budget, multi-window burn-rate alerts, and — the part most examples skip — a one-command way to **break the service and watch the alert actually fire**.
 
-Most SLO examples ship alert rules nobody has ever seen trigger. The rules in this repo were each tested against an induced outage, and two of them were wrong the first time. Those bugs, and why they were invisible on paper, are written up in [Debugging Notes](#debugging-notes).
+[![CI](https://github.com/navaneeth-c/k8s-slo-lab/actions/workflows/ci-cd.yaml/badge.svg?branch=main)](https://github.com/navaneeth-c/k8s-slo-lab/actions/workflows/ci-cd.yaml)
+
+Most SLO examples ship alert rules nobody has ever seen trigger. The rules in this repo were each tested against an induced outage, and two of them were wrong the first time. Those bugs, and why they were invisible on paper, are written up in [Debugging Notes](#debugging-notes). This repo is a public rebuild of a private original where that debugging happened; the git history here is the rebuild's, not the journey's.
 
 ```bash
 make up      # kind cluster + Prometheus/Grafana + podinfo, ~4 min
@@ -12,9 +14,9 @@ make burn    # drive 5xx traffic, watch the fast-burn SLO alert fire
 make down    # delete the cluster
 ```
 
-Prereqs: Docker, `kind`, `helm`, `kubectl`. No cloud account, no credentials.
+Prereqs: Docker, `kind`, `helm` **v4** (on Helm 3, change `--rollback-on-failure` to `--atomic` in `scripts/deploy-podinfo.sh`), `kubectl`, `python3`, `curl`. No cloud account, no credentials.
 
-What `make break` prints, from an actual run:
+What `make break` prints, from an actual run (abridged — the kubectl/make echo lines are trimmed):
 
 ```
 kubectl -n default scale deployment/podinfo --replicas=0
@@ -59,7 +61,7 @@ sum(rate(http_requests_total{job="podinfo", status!~"5.."}[5m]))
 histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job="podinfo"}[5m])) by (le))
 ```
 
-Error budget is 0.1% of requests over 30 days. At ~5,000 req/min that's ~216M requests/month, so roughly 216K failed requests of budget to spend.
+Error budget is 0.1% of requests over 30 days. At a nominal 5,000 req/min — a number picked for the arithmetic; nothing in this repo generates or measures that rate — that's ~216M requests/month, so roughly 216K failed requests of budget to spend.
 
 ### Why two burn-rate windows, not one
 
@@ -96,11 +98,11 @@ First deploy, Prometheus's targets page had zero entries for podinfo. No error a
 
 `ServiceMonitor.spec.selector` without an explicit `namespaceSelector` only matches Services in its **own** namespace. Mine was in `monitoring`; podinfo's Service is in `default`. Added `namespaceSelector.matchNames: [default, prod]`. The silence is the dangerous part: a misscoped ServiceMonitor looks identical to a correctly-scoped one with nothing to scrape.
 
-### 3. A metrics port that never existed
+### 3. A metrics port that was never enabled
 
-The chart originally split `http` (9898) from a separate `http-metrics` (9797), on the assumption podinfo exposes metrics on a dedicated port. Once the namespace fix landed, Prometheus found the target and every scrape returned `connection refused`.
+The chart originally split `http` (9898) from a separate `http-metrics` (9797), copied from the upstream podinfo chart's layout. Once the namespace fix landed, Prometheus found the target and every scrape returned `connection refused`.
 
-Port-forwarded 9898 directly, hit `/metrics`, got a real response. Nothing was ever listening on 9797. Removed the phantom port — metrics come off the same port as everything else.
+Port-forwarded 9898 directly, hit `/metrics`, got a real response — nothing was listening on 9797. The root cause is less flattering than a phantom port: podinfo *does* support a dedicated metrics port (`--port-metrics`), but it defaults to disabled, and the chart carried the port number over without the flag that turns it on. Removed the second port; metrics come off the main port unless that flag is set.
 
 ---
 
@@ -108,9 +110,9 @@ Port-forwarded 9898 directly, hit `/metrics`, got a real response. Nothing was e
 
 - **`ServiceMonitor` and `PrometheusRule`s are applied standalone, not baked into the chart.** The chart installs fine on a cluster with no Prometheus Operator present. "Deploy the app" and "this specific stack happens to be watching it" shouldn't be one operation.
 
-- **`values-prod.yaml` overrides only what actually differs** — replicas, resources, HPA thresholds. The diff between the two files *is* the production decision, rather than a duplicated config with one field changed.
+- **`values-prod.yaml` overrides only what actually differs** — resources and HPA thresholds. (An earlier revision also carried a `replicaCount` override that rendered nothing, since the HPA owns replicas whenever autoscaling is on; deleted once a review caught it.) The diff between the two files *is* the production decision, rather than a duplicated config with one field changed.
 
-- **CI's staging and prod stages run against real ephemeral `kind` clusters** spun up inside the runner, not stub steps. An actual `helm upgrade --install`, an actual rollout check, an actual rollback path. A real prod target swaps in a persistent cluster via a kubeconfig secret; nothing else in the pipeline changes.
+- **CI's staging and prod stages run against real ephemeral `kind` clusters** spun up inside the runner, not stub steps. An actual `helm upgrade --install` and an actual rollout check, with `--atomic` as the rollback mechanism; the explicit rollback step behind it is a belt-and-braces fallback that has yet to be exercised by a real failure. A real prod target swaps in a persistent cluster via a kubeconfig secret; nothing else in the pipeline changes.
 
 - **Prometheus's ServiceMonitor selector is relaxed** (`serviceMonitorSelectorNilUsesHelmValues: false`) so it watches any ServiceMonitor in the cluster. Fine for a single-team lab; a real multi-tenant cluster should scope this per namespace so one team's bad ServiceMonitor can't affect another's.
 
@@ -130,19 +132,31 @@ push ──> lint + template (both value sets)
          ⏸  manual approval gate
               │
               ▼
-         prod: --atomic deploy, explicit rollback on failure
+         prod: --atomic deploy (auto-rollback on failure)
 ```
 
 One thing that can't live in YAML: the approval gate needs a `production` GitHub Environment with a required-reviewers rule — **Settings → Environments → New environment → `production` → Required reviewers**. The workflow already targets `environment: production`, but it won't actually pause until that rule exists.
 
 ---
 
+## Known limitations
+
+Found in a later self-review. Documented here rather than silently fixed; each is queued in the Roadmap.
+
+- **The availability alert is cluster-wide, not per-environment.** `absent(up{job="podinfo"} == 1)` stays quiet as long as *any* podinfo target is healthy — and the ServiceMonitor watches both `default` and `prod`, so a prod-only outage goes undetected while dev is up. `absent()` over a binary expression also carries no labels, so the alert reaches Alertmanager with nothing to route on. The fix is one rule per namespace.
+- **The availability SLI counts synthetic traffic.** podinfo's `http_requests_total` carries only a `status` label and its metrics middleware wraps every route, so kubelet probes and Prometheus scrapes inflate the denominator with no `path` label to filter them out. The right source is `http_request_duration_seconds_count`, which carries `{method, path, status}`.
+- **The Grafana dashboard needs a pass.** Its first panel groups by a `method` label the metric doesn't have, the "error budget" panel is really a burn-rate panel, and the panels duplicate raw queries instead of reading the recording rules.
+- **`PODINFO_LOG_LEVEL` in the ConfigMap is inert** — podinfo binds the `--level` flag as `PODINFO_LEVEL`.
+- **`make burn` has no cleanup target.** The 900s load job outlives the 600s watcher, so the error load keeps running after the alert fires; the recovery today is waiting it out or `make down`.
+- **CI never validates the alert rules** — the one thing this repo is about. `promtool check rules` / `promtool test rules` belongs in the lint job, with fixtures that pin the 14.4×/6× thresholds.
+
 ## Roadmap
 
 - k6 load stage in CI, so staging is verified under load rather than by rollout status alone.
 - `kubeconform` / `helm unittest` in the lint job — validate rendered manifests, not just chart syntax.
 - Terraform for the underlying node pool, so cluster setup is as codified as the app layer.
-- Latency burn-rate alerts. Availability has full multi-window coverage; the p99 SLO currently has an SLI but no alert.
+- Latency burn-rate alerts. Availability has multi-window coverage; the p99 SLO currently has an SLI but no alert.
+- Everything in Known limitations above, test-first where possible (`promtool test rules` lands before the alert rewrites it validates).
 
 ---
 

@@ -32,8 +32,9 @@ spec:
       rules:
         # ---- SLI recording rules -------------------------------------------
         # Fraction of requests that were server errors, at each window length.
-        # Recorded rather than inlined so the alert expressions stay readable
-        # and so the same series backs both the dashboard and the alerts.
+        # Recorded rather than inlined so the alert expressions stay readable.
+        # (The dashboard currently duplicates these queries instead of reading
+        # the recorded series — see Known limitations in the README.)
         - record: podinfo:http_error_ratio:rate5m
           expr: |
             sum(rate(http_requests_total{job="podinfo", status=~"5.."}[5m]))

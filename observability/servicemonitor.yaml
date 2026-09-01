@@ -22,12 +22,13 @@ spec:
     matchLabels:
       app.kubernetes.io/name: podinfo
   endpoints:
-    # podinfo serves /metrics on its single main port, not a dedicated
-    # metrics port — port name here matches the named port in
+    # podinfo serves /metrics on its single main port here — its dedicated
+    # metrics port (--port-metrics) defaults to disabled and the chart doesn't
+    # enable it. Port name matches the named port in
     # charts/podinfo/templates/service.yaml. (Second real bug found while
-    # verifying: a separate 9797 metrics port doesn't exist. Confirmed by
-    # port-forwarding 9898 directly and getting a real /metrics response,
-    # while 9797 was refusing connections.)
+    # verifying: a 9797 metrics port carried over without the flag that
+    # enables it. Confirmed by port-forwarding 9898 directly and getting a
+    # real /metrics response, while 9797 was refusing connections.)
     - port: http
       path: /metrics
       interval: 15s

@@ -13,7 +13,7 @@ fullnameOverride: ""
 
 service:
   type: ClusterIP
-  port: 9898  # app HTTP port — /metrics is also served here, podinfo doesn't expose a separate metrics port
+  port: 9898  # app HTTP port — /metrics is served here too; podinfo's dedicated metrics port (--port-metrics) defaults to disabled and this chart doesn't enable it
 
 resources:
   requests:
