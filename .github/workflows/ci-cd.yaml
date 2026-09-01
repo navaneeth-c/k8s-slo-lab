@@ -1,8 +1,12 @@
 name: podinfo CI/CD
 
+# Pushes to main run the full pipeline (lint -> staging -> gate -> prod).
+# Everything else is validated through its pull request. Triggering on both
+# `push: ["**"]` and `pull_request` would fire two identical runs for every
+# PR commit — same jobs, twice the runner minutes, a doubled check list.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
