@@ -18,20 +18,25 @@ make test-rules   # promtool unit tests for the alert rules (no cluster needed)
 
 Prereqs: Docker, `kind`, `helm` (3 or 4 — the deploy script detects which rollback flag your version speaks), `kubectl`, `python3`, `curl`. No cloud account, no credentials.
 
-What `make break` prints, from an actual run (abridged — the kubectl/make echo lines are trimmed):
+What `make break` does, recorded live (this is the full run, idle-compressed):
+
+![make break: the availability alert goes inactive -> pending -> firing](docs/break.gif)
 
 ```
 kubectl -n default scale deployment/podinfo --replicas=0
+deployment.apps/podinfo scaled
+./scripts/alert-watch.sh PodinfoUnavailable firing 300
 Watching alert 'PodinfoUnavailable' for state 'firing' (timeout 300s)...
-19:41:46  PodinfoUnavailable -> inactive
-19:42:37  PodinfoUnavailable -> pending
-19:44:37  PodinfoUnavailable -> firing
+14:55:36  PodinfoUnavailable -> inactive
+14:56:17  PodinfoUnavailable -> pending
+14:58:18  PodinfoUnavailable -> firing
+Alert reached 'firing'.
 ```
 
-`pending` about 50 seconds after the pods go away, then `firing` exactly two
+`pending` about 40 seconds after the pods go away, then `firing` exactly two
 minutes later — the rule's `for: 2m`. `make burn` does the same for the SLO
-fast-burn alert, driving deliberate 5xx traffic until the error ratio clears
-14.4x the budget rate.
+fast-burn alert: drives deliberate 5xx traffic, watches the fast-burn alert
+fire (~2½ minutes on the same run), then stops the load and cleans up its job.
 
 The workload under test is [stefanprodan/podinfo](https://github.com/stefanprodan/podinfo) — deliberately boring, because the app is not the point. The SLO loop around it is.
 
