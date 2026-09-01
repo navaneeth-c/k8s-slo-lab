@@ -14,6 +14,21 @@ make down    # delete the cluster
 
 Prereqs: Docker, `kind`, `helm`, `kubectl`. No cloud account, no credentials.
 
+What `make break` prints, from an actual run:
+
+```
+kubectl -n default scale deployment/podinfo --replicas=0
+Watching alert 'PodinfoUnavailable' for state 'firing' (timeout 300s)...
+19:41:46  PodinfoUnavailable -> inactive
+19:42:37  PodinfoUnavailable -> pending
+19:44:37  PodinfoUnavailable -> firing
+```
+
+`pending` about 50 seconds after the pods go away, then `firing` exactly two
+minutes later — the rule's `for: 2m`. `make burn` does the same for the SLO
+fast-burn alert, driving deliberate 5xx traffic until the error ratio clears
+14.4x the budget rate.
+
 The workload under test is [stefanprodan/podinfo](https://github.com/stefanprodan/podinfo) — deliberately boring, because the app is not the point. The SLO loop around it is.
 
 ---
