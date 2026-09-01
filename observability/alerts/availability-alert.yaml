@@ -1,17 +1,26 @@
-# Fires when podinfo has been unreachable for 2+ consecutive minutes.
+# Fires when a podinfo environment that WAS being scraped has had no healthy
+# target for 2+ consecutive minutes.
 #
-# NOT just `up{job="podinfo"} == 0` — tested that against a real induced
-# outage (scaled the deployment to 0) and it never fired. Reason: `up` only
-# exists for targets Prometheus's service discovery actually found. Scale to
-# zero -> zero endpoints -> the ServiceMonitor discovers no targets at all ->
-# the `up` series doesn't go to 0, it disappears entirely. `== 0` only catches
-# "a target exists but the scrape itself failed" (e.g. a Ready pod with the
-# app hung) — it misses "no healthy pods exist," which is the more common
-# outage shape and literally what the requirement asks for.
+# Two hard-won lessons are encoded here:
 #
-# `absent(up{job="podinfo"} == 1)` catches both: it fires if there's no
-# up-and-healthy target at all, whether that's because none were discovered
-# or because the ones that were discovered are reporting down.
+# 1. NOT `up{...} == 0`. `up` only exists for targets service discovery found.
+#    Scale to zero -> zero endpoints -> the series disappears rather than going
+#    to 0, so `== 0` misses the most common outage shape entirely.
+#
+# 2. NOT a single cluster-wide `absent(up{job="podinfo"} == 1)` either. The
+#    ServiceMonitor watches both `default` and `prod`; a cluster-wide absent()
+#    stays quiet during a prod-only outage as long as dev is healthy. absent()
+#    over a binary expression also carries no labels, so the alert would reach
+#    Alertmanager with nothing to route on. One rule per namespace, with the
+#    namespace restored as a static label, fixes both.
+#
+# The `present_over_time(...[1h])` gate scopes each rule to environments that
+# actually exist: it only fires if that namespace HAD a scraped target in the
+# last hour and now has no healthy one. A namespace that was never deployed
+# (prod, in the default lab flow) never alerts; an environment that vanishes
+# does. The cost is a 1h memory: an environment deliberately torn down keeps
+# alerting for up to an hour — acceptable here, worth an explicit silence in
+# real life.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -23,10 +32,29 @@ spec:
     - name: podinfo.availability
       rules:
         - alert: PodinfoUnavailable
-          expr: absent(up{job="podinfo"} == 1)
+          expr: |
+            absent(up{job="podinfo", namespace="default"} == 1)
+            and on()
+            present_over_time(up{job="podinfo", namespace="default"}[1h])
           for: 2m
           labels:
             severity: critical
+            namespace: default
           annotations:
-            summary: "podinfo has been unreachable for 2+ minutes"
-            description: "No healthy podinfo target has been scraped for at least 2 minutes. Likely causes: scaled to zero, all pods crashlooping, a bad rollout, or a NetworkPolicy/Service misconfiguration blocking scrape traffic."
+            summary: "podinfo (default) has been unreachable for 2+ minutes"
+            description: "No healthy podinfo target in `default` for at least 2 minutes, though one existed within the last hour. Likely causes: scaled to zero, all pods crashlooping, a bad rollout, or a NetworkPolicy/Service change blocking scrape traffic."
+            runbook_url: "https://github.com/navaneeth-c/k8s-slo-lab#debugging-notes"
+
+        - alert: PodinfoUnavailable
+          expr: |
+            absent(up{job="podinfo", namespace="prod"} == 1)
+            and on()
+            present_over_time(up{job="podinfo", namespace="prod"}[1h])
+          for: 2m
+          labels:
+            severity: critical
+            namespace: prod
+          annotations:
+            summary: "podinfo (prod) has been unreachable for 2+ minutes"
+            description: "No healthy podinfo target in `prod` for at least 2 minutes, though one existed within the last hour. Likely causes: scaled to zero, all pods crashlooping, a bad rollout, or a NetworkPolicy/Service change blocking scrape traffic."
+            runbook_url: "https://github.com/navaneeth-c/k8s-slo-lab#debugging-notes"
