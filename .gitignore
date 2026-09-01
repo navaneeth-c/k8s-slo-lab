@@ -1,0 +1,5 @@
+# Local-only artifacts, never worth committing
+.kube/
+*.log
+kubeconfig*
+.DS_Store
