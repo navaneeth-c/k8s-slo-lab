@@ -58,15 +58,17 @@ The workload under test is [stefanprodan/podinfo](https://github.com/stefanproda
 ```promql
 # Availability SLI — error ratio per namespace, PROBE TRAFFIC EXCLUDED.
 # Source metric matters: podinfo's http_requests_total has only a `status`
-# label and counts /healthz, /readyz and /metrics hits, so at idle the SLI
-# would be measuring the kubelet. The duration histogram's count carries
+# label and counts probe and scrape hits, so at idle the SLI would be
+# measuring the kubelet. (Note the label VALUES: podinfo strips the slash and
+# collapses dynamic segments — /healthz records as "healthz", / as "root",
+# /status/500 as "status". See Debugging Note 4.) The duration histogram's count carries
 # {method, path, status}, which makes the exclusion possible.
-sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"/healthz|/readyz|/metrics"}[5m]))
+sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"healthz|readyz|metrics"}[5m]))
 /
-sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"/healthz|/readyz|/metrics"}[5m]))
+sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"healthz|readyz|metrics"}[5m]))
 
 # Latency SLI (p99), same exclusion
-histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="podinfo", path!~"/healthz|/readyz|/metrics"}[5m])))
+histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="podinfo", path!~"healthz|readyz|metrics"}[5m])))
 ```
 
 A side effect worth knowing: with probes excluded, an idle namespace has a 0/0 SLI. That's `NaN`, and `NaN` fails every threshold comparison — so the burn alerts structurally cannot fire on a namespace receiving no traffic, which replaces the usual minimum-traffic guard clause.
@@ -117,6 +119,12 @@ The chart originally split `http` (9898) from a separate `http-metrics` (9797), 
 Port-forwarded 9898 directly, hit `/metrics`, got a real response — nothing was listening on 9797. The root cause is less flattering than a phantom port: podinfo *does* support a dedicated metrics port (`--port-metrics`), but it defaults to disabled, and the chart carried the port number over without the flag that turns it on. Removed the second port; metrics come off the main port unless that flag is set.
 
 ---
+
+### 4. The probe filter that matched nothing
+
+The SLI's probe exclusion was first written as `path!~"/healthz|/readyz|/metrics"` — with leading slashes, the way the routes are spelled. The promtool unit tests passed, because the test fixtures encoded the same assumption (`path="/healthz"`). Against the live cluster, the filter matched nothing: podinfo records the label as `healthz`, slash stripped, and collapses dynamic segments (`/` becomes `root`, `/status/500` becomes `status`).
+
+Two lessons worth keeping. Label values are an empirical fact, not a spelling convention — query the live series before writing a matcher against it. And unit tests share your assumptions; they pin behavior against your model of the data, so a wrong model passes cleanly. The tests now use the real label shapes, and this note exists because the only thing that caught it was running the thing.
 
 ## Design decisions
 

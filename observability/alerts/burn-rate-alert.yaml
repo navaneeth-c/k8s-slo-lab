@@ -47,27 +47,27 @@ spec:
         # ---- SLI recording rules -------------------------------------------
         - record: namespace:podinfo_http_error_ratio:rate5m
           expr: |
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"/healthz|/readyz|/metrics"}[5m]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"healthz|readyz|metrics"}[5m]))
             /
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"/healthz|/readyz|/metrics"}[5m]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"healthz|readyz|metrics"}[5m]))
 
         - record: namespace:podinfo_http_error_ratio:rate30m
           expr: |
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"/healthz|/readyz|/metrics"}[30m]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"healthz|readyz|metrics"}[30m]))
             /
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"/healthz|/readyz|/metrics"}[30m]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"healthz|readyz|metrics"}[30m]))
 
         - record: namespace:podinfo_http_error_ratio:rate1h
           expr: |
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"/healthz|/readyz|/metrics"}[1h]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"healthz|readyz|metrics"}[1h]))
             /
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"/healthz|/readyz|/metrics"}[1h]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"healthz|readyz|metrics"}[1h]))
 
         - record: namespace:podinfo_http_error_ratio:rate6h
           expr: |
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"/healthz|/readyz|/metrics"}[6h]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", status=~"5..", path!~"healthz|readyz|metrics"}[6h]))
             /
-            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"/healthz|/readyz|/metrics"}[6h]))
+            sum by (namespace) (rate(http_request_duration_seconds_count{job="podinfo", path!~"healthz|readyz|metrics"}[6h]))
 
         # ---- Fast burn: 1h @ 14.4x, gated on 5m ----------------------------
         - alert: PodinfoSLOFastBurn
