@@ -4,8 +4,6 @@
 # Only overrides what actually needs to differ in prod; everything else
 # inherits from values.yaml, so the diff here IS the design decision.
 
-replicaCount: 4
-
 resources:
   requests:
     cpu: 100m

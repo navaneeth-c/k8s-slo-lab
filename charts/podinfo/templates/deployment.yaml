@@ -25,11 +25,11 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            # podinfo serves /metrics on the same port as everything else —
-            # there's no separate metrics port. (First pass had this split
-            # into a second 9797 port; Prometheus scrapes came back
-            # "connection refused" because nothing was ever listening
-            # there. Confirmed by port-forwarding 9898 directly.)
+            # podinfo serves /metrics on the same port as everything else;
+            # its dedicated metrics port (--port-metrics) defaults to disabled
+            # and this chart doesn't enable it. (First pass carried a second
+            # 9797 port without that flag; Prometheus scrapes came back
+            # "connection refused". Confirmed by port-forwarding 9898 directly.)
             - name: http
               containerPort: 9898
               protocol: TCP
