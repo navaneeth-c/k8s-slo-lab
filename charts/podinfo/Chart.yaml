@@ -1,0 +1,11 @@
+apiVersion: v2
+name: podinfo
+description: Deploys stefanprodan/podinfo with autoscaling, health checks, and Prometheus-scrapable metrics — the workload under test for the SLO lab.
+type: application
+version: 0.1.0
+appVersion: "6.7.1"
+keywords:
+  - podinfo
+  - slo
+  - observability
+  - platform-engineering

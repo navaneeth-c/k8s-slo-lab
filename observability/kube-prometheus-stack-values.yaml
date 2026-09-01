@@ -1,0 +1,47 @@
+# Values for the prometheus-community/kube-prometheus-stack chart.
+# Deliberately minimal for a local kind cluster — see README for what is
+# simplified here vs. what a real production install would tighten.
+prometheus:
+  prometheusSpec:
+    # Default only watches ServiceMonitors carrying its own release label.
+    # Relaxed so ours gets picked up without extra label-matching. Fine for
+    # a single-team lab cluster; scope this per-namespace on a real one.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 6h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    storageSpec: {}   # emptyDir — no persistence needed for a local lab cluster
+
+grafana:
+  adminPassword: admin   # local lab only, not how you would handle this for real
+  service:
+    type: NodePort
+    nodePort: 30090       # matches the kind cluster's extraPortMappings
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  sidecar:
+    dashboards:
+      enabled: true       # auto-loads any ConfigMap labeled grafana_dashboard=1
+      label: grafana_dashboard
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
