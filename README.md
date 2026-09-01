@@ -124,7 +124,7 @@ Port-forwarded 9898 directly, hit `/metrics`, got a real response — nothing wa
 
 - **`values-prod.yaml` overrides only what actually differs** — resources and HPA thresholds. (An earlier revision also carried a `replicaCount` override that rendered nothing, since the HPA owns replicas whenever autoscaling is on; deleted once a review caught it.) The diff between the two files *is* the production decision, rather than a duplicated config with one field changed.
 
-- **CI's staging and prod stages run against real ephemeral `kind` clusters** spun up inside the runner, not stub steps. An actual `helm upgrade --install` and an actual rollout check, with `--atomic` as the rollback mechanism; the explicit rollback step behind it is a belt-and-braces fallback that has yet to be exercised by a real failure. A real prod target swaps in a persistent cluster via a kubeconfig secret; nothing else in the pipeline changes.
+- **CI's staging and prod stages run against real ephemeral `kind` clusters** spun up inside the runner, not stub steps. An actual `helm upgrade --install`, a rollout check, and a smoke test that curls the service, with `--atomic` as the rollback mechanism. (An explicit `helm rollback` step used to sit behind it — dead code on an ephemeral cluster where the release is always revision 1, so it was removed rather than kept for show.) A real prod target swaps in a persistent cluster via a kubeconfig secret; nothing else in the pipeline changes.
 
 - **Prometheus's ServiceMonitor selector is relaxed** (`serviceMonitorSelectorNilUsesHelmValues: false`) so it watches any ServiceMonitor in the cluster. Fine for a single-team lab; a real multi-tenant cluster should scope this per namespace so one team's bad ServiceMonitor can't affect another's.
 
